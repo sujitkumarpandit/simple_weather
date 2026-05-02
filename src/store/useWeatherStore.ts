@@ -1,6 +1,5 @@
 import { create } from 'zustand';
 import { WeatherData, ForecastData, Units, GeocodingResult, UVData, AQIData } from '../types';
-import { weatherService } from '../services/weatherService';
 
 interface WeatherStore {
   currentWeather: WeatherData | null;
@@ -39,6 +38,23 @@ const getStoredTheme = (): 'dark' | 'light' => {
   }
 };
 
+const API_KEY = (import.meta as any).env?.VITE_OPENWEATHER_API_KEY;
+
+const buildUrl = (base: string, params: Record<string, string>) => {
+  const query = new URLSearchParams(params);
+  return `${base}?${query.toString()}`;
+};
+
+const fetchJson = async <T>(url: string): Promise<T> => {
+  const response = await fetch(url);
+  const data = await response.json();
+  if (!response.ok) {
+    const message = data?.message || data?.error || response.statusText || 'OpenWeather request failed';
+    throw new Error(message);
+  }
+  return data;
+};
+
 export const useWeatherStore = create<WeatherStore>((set, get) => ({
   currentWeather: null,
   forecast: null,
@@ -68,36 +84,77 @@ export const useWeatherStore = create<WeatherStore>((set, get) => ({
   fetchWeather: async (lat: number, lon: number) => {
     set({ isLoading: true, error: null });
     try {
-      const { units } = get();
-      
-      const [current, forecast] = await Promise.all([
-        weatherService.getCurrentWeather(lat, lon, units),
-        weatherService.getForecast(lat, lon, units),
-      ]);
-
-      let uv = null;
-      let aqiData = null;
-      try {
-        const [uvRes, aqiRes] = await Promise.allSettled([
-          weatherService.getUVIndex(lat, lon),
-          weatherService.getAirPollution(lat, lon),
-        ]);
-        uv = uvRes.status === 'fulfilled' ? uvRes.value : null;
-        aqiData = aqiRes.status === 'fulfilled' ? aqiRes.value : null;
-      } catch (secondaryError) {
-        console.warn('Secondary data fetch failed:', secondaryError);
+      if (!API_KEY) {
+        throw new Error('OpenWeather API key is not configured. Set VITE_OPENWEATHER_API_KEY.');
       }
 
-      set({ currentWeather: current, forecast, uvIndex: uv, aqi: aqiData, isLoading: false });
+      const { units } = get();
+      const currentUrl = buildUrl('https://api.openweathermap.org/data/2.5/weather', {
+        lat: String(lat),
+        lon: String(lon),
+        units,
+        appid: API_KEY,
+      });
+
+      const forecastUrl = buildUrl('https://api.openweathermap.org/data/2.5/forecast', {
+        lat: String(lat),
+        lon: String(lon),
+        units,
+        appid: API_KEY,
+      });
+
+      const [current, forecast] = await Promise.all([
+        fetchJson<WeatherData>(currentUrl),
+        fetchJson<ForecastData>(forecastUrl),
+      ]);
+
+      const uvPromise = fetchJson<UVData>(
+        buildUrl('https://api.openweathermap.org/data/2.5/uvi', {
+          lat: String(lat),
+          lon: String(lon),
+          appid: API_KEY,
+        })
+      ).catch(() => null);
+
+      const aqiPromise = fetchJson<AQIData>(
+        buildUrl('https://api.openweathermap.org/data/2.5/air_pollution', {
+          lat: String(lat),
+          lon: String(lon),
+          appid: API_KEY,
+        })
+      ).catch(() => null);
+
+      const [uvIndex, aqi] = await Promise.all([uvPromise, aqiPromise]);
+      set({ currentWeather: current, forecast, uvIndex, aqi, isLoading: false });
     } catch (err: any) {
-      const errorMessage = err.response?.data?.error || err.response?.data?.message || err.message || 'Failed to fetch weather data';
+      const errorMessage = err?.message || 'Failed to fetch weather data';
       set({ error: errorMessage, isLoading: false });
     }
   },
 
   searchLocation: async (query: string) => {
     try {
-      return await weatherService.searchLocations(query);
+      if (!API_KEY || !query.trim()) return [];
+
+      const url = buildUrl('https://api.openweathermap.org/geo/1.0/direct', {
+        q: query,
+        limit: '5',
+        appid: API_KEY,
+      });
+
+      const response = await fetch(url);
+      const results = await response.json();
+      if (!response.ok || !Array.isArray(results)) {
+        return [];
+      }
+
+      return results.map((item: any) => ({
+        name: item.name,
+        lat: item.lat,
+        lon: item.lon,
+        country: item.country,
+        state: item.state,
+      }));
     } catch (err) {
       console.error('Search error:', err);
       return [];
