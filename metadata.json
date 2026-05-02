@@ -1,0 +1,6 @@
+{
+  "name": "SkyCast Elite",
+  "description": "A high-performance, premium weather dashboard with real-time forecasts, interactive maps, and AI-powered weather insights.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["Weather Forecasting", "Interactive Maps", "AI Summaries", "User Profiles"]
+}
