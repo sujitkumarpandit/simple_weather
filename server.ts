@@ -45,7 +45,7 @@ async function startServer() {
 
     try {
       const response = await fetch(
-        `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=${units}&appid=${apiKey}`
+        `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=${units}&appid=0c82d8d0d6310e5a70397a28d38769ca`
       );
       
       const data = await response.json();
